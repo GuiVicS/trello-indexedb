@@ -136,13 +136,14 @@
     const topbar = $("#topbar");
     const titles = { board: "Quadro", table: "Tabela", calendar: "Calendário", reports: "Relatórios" };
     let extra = "";
-    if (state.view === "board") {
+    if (state.view === "board" && activeWorkspace()) {
       extra = `<select class="group-select" id="groupBySelect">${GROUPABLE.map(g => `<option value="${g.id}" ${g.id===state.groupBy?"selected":""}>Agrupar por: ${g.label}</option>`).join("")}</select>`;
     }
+    const showNewTaskBtn = state.view !== "reports" && !!activeWorkspace();
     topbar.innerHTML = `
       <h1>${titles[state.view] || ""}</h1>
       ${extra}
-      ${state.view !== "reports" ? `<button class="icon-btn primary" id="newTaskBtn"><i data-lucide="plus"></i> Nova tarefa</button>` : ""}
+      ${showNewTaskBtn ? `<button class="icon-btn primary" id="newTaskBtn"><i data-lucide="plus"></i> Nova tarefa</button>` : ""}
     `;
     icons();
     if ($("#groupBySelect")) $("#groupBySelect").addEventListener("change", (e) => { state.groupBy = e.target.value; renderView(); });
@@ -165,7 +166,8 @@
   /* ================= board view ================= */
   function renderBoard(container) {
     const ws = activeWorkspace();
-    if (!ws) { container.innerHTML = emptyStateHTML(); icons(); return; }
+    if (!ws) { container.innerHTML = emptyStateHTML("no-workspace"); icons(); return; }
+    if (state.tasks.length === 0) { container.innerHTML = emptyStateHTML("no-tasks-board"); icons(); return; }
     const group = GROUPABLE.find(g => g.id === state.groupBy);
     const wrap = document.createElement("div");
     wrap.id = "boardView";
@@ -193,7 +195,7 @@
     const overdue = t.dueDate && t.dueDate < todayStr() && t.status !== "done";
     const doneItems = (t.checklist || []).filter(c => c.done).length;
     return `
-    <div class="tcard" draggable="true" data-task-id="${t.id}" data-action="open-task">
+    <div class="tcard" draggable="true" data-task-id="${t.id}" data-priority="${t.priority}" data-action="open-task">
       <div class="tcard-title">${esc(t.title)}</div>
       <div class="tcard-meta">
         ${t.priority && t.priority !== "none" ? `<span class="pill pill-priority-${t.priority}">${PRIORITY.find(p=>p.id===t.priority).label}</span>` : ""}
@@ -239,29 +241,38 @@
   /* ================= table view ================= */
   function renderTable(container) {
     const ws = activeWorkspace();
-    if (!ws) { container.innerHTML = emptyStateHTML(); icons(); return; }
+    if (!ws) { container.innerHTML = emptyStateHTML("no-workspace"); icons(); return; }
+    if (state.tasks.length === 0) { container.innerHTML = emptyStateHTML("no-tasks-table"); icons(); wireEmptyAddTask(); return; }
     const rows = state.tasks.slice().sort((a,b) => b.updatedAt - a.updatedAt);
     container.innerHTML = `
       <table class="tbl">
         <thead><tr><th>Título</th><th>Status</th><th>Prioridade</th><th>Prazo</th><th>Atualizado</th></tr></thead>
         <tbody>
-          ${rows.map(t => `
+          ${rows.map(t => {
+            const s = STATUS.find(x=>x.id===t.status);
+            return `
             <tr data-action="open-task" data-task-id="${t.id}">
               <td>${esc(t.title)}</td>
-              <td>${STATUS.find(s=>s.id===t.status)?.label || ""}</td>
+              <td><span class="status-dot" style="--dot-color:${s?.color||"var(--text-dim)"}">${s?.label || ""}</span></td>
               <td>${PRIORITY.find(p=>p.id===t.priority)?.label || ""}</td>
               <td>${t.dueDate ? fmtDate(t.dueDate) : "—"}</td>
               <td>${fmtDateTime(t.updatedAt)}</td>
-            </tr>`).join("") || `<tr><td colspan="5" style="color:var(--text-dim)">Nenhuma tarefa ainda.</td></tr>`}
+            </tr>`;}).join("")}
         </tbody>
       </table>`;
     icons();
   }
 
+  function wireEmptyAddTask() {
+    const btn = $("#emptyAddTaskBtn");
+    if (btn) btn.addEventListener("click", () => quickAddTask());
+  }
+
   /* ================= calendar view ================= */
   function renderCalendar(container) {
     const ws = activeWorkspace();
-    if (!ws) { container.innerHTML = emptyStateHTML(); icons(); return; }
+    if (!ws) { container.innerHTML = emptyStateHTML("no-workspace"); icons(); return; }
+    if (state.tasks.length === 0) { container.innerHTML = emptyStateHTML("no-tasks-calendar"); icons(); wireEmptyAddTask(); return; }
     const year = state.calYear, month = state.calMonth;
     const first = new Date(year, month, 1);
     const startDow = first.getDay();
@@ -300,7 +311,8 @@
   /* ================= reports view ================= */
   function renderReports(container) {
     const ws = activeWorkspace();
-    if (!ws) { container.innerHTML = emptyStateHTML(); icons(); return; }
+    if (!ws) { container.innerHTML = emptyStateHTML("no-workspace"); icons(); return; }
+    if (state.tasks.length === 0) { container.innerHTML = emptyStateHTML("no-tasks-reports"); icons(); return; }
     const from = state.reportFrom || (() => { const d = new Date(); d.setDate(d.getDate()-30); return d.toISOString().slice(0,10); })();
     const to = state.reportTo || todayStr();
     container.innerHTML = `
@@ -319,7 +331,7 @@
       generateReport(state.reportFrom, state.reportTo);
     });
     $("#printReportBtn").addEventListener("click", () => window.print());
-    if (state.lastReportHTML) { $("#reportOutput").innerHTML = state.lastReportHTML; $("#reportOutput").classList.remove("hidden"); }
+    if (state.lastReportHTML) { $("#reportOutput").innerHTML = state.lastReportHTML; $("#reportOutput").classList.remove("hidden"); icons(); }
   }
 
   function generateReport(from, to) {
@@ -340,10 +352,10 @@
         <p>No período selecionado, ${inRange.length} tarefa(s) tiveram atividade. ${done.length} foram concluídas, ${doing.length} seguem em andamento e ${overdue.length} estão atrasadas. ${overdue.length > 0 ? "Recomenda-se priorizar os itens atrasados listados abaixo." : "Não há itens atrasados no período — bom ritmo."}</p>
       </div>
       <div class="report-metrics">
-        <div class="metric"><div class="num">${inRange.length}</div><div class="lbl">Total</div></div>
-        <div class="metric"><div class="num">${done.length}</div><div class="lbl">Concluídas</div></div>
-        <div class="metric"><div class="num">${doing.length}</div><div class="lbl">Em andamento</div></div>
-        <div class="metric"><div class="num">${overdue.length}</div><div class="lbl">Atrasadas</div></div>
+        <div class="metric"><i data-lucide="list-checks"></i><div class="num">${inRange.length}</div><div class="lbl">Total</div></div>
+        <div class="metric" style="--metric-color:var(--success)"><i data-lucide="check-circle-2"></i><div class="num">${done.length}</div><div class="lbl">Concluídas</div></div>
+        <div class="metric" style="--metric-color:var(--warn)"><i data-lucide="loader-circle"></i><div class="num">${doing.length}</div><div class="lbl">Em andamento</div></div>
+        <div class="metric" style="--metric-color:var(--danger)"><i data-lucide="alert-triangle"></i><div class="num">${overdue.length}</div><div class="lbl">Atrasadas</div></div>
       </div>
       <div class="report-section">
         <h3>Concluído</h3>
@@ -366,10 +378,49 @@
     state.lastReportHTML = html;
     $("#reportOutput").innerHTML = html;
     $("#reportOutput").classList.remove("hidden");
+    icons();
   }
 
-  function emptyStateHTML() {
-    return `<div class="empty"><i data-lucide="inbox" style="width:40px;height:40px"></i><p>Crie um espaço de trabalho para começar.</p></div>`;
+  function emptyStateHTML(kind) {
+    const kinds = {
+      "no-workspace": {
+        icon: "layout-dashboard",
+        title: "Vamos criar seu primeiro espaço",
+        text: "Um espaço de trabalho guarda seus quadros, tarefas e prazos. Crie o primeiro para começar a organizar.",
+        cta: `<button class="icon-btn primary" data-action="new-ws"><i data-lucide="plus"></i> Criar espaço de trabalho</button>`,
+      },
+      "no-tasks-board": {
+        icon: "columns-3",
+        title: "Nenhuma tarefa por aqui ainda",
+        text: "Adicione a primeira tarefa e arraste entre as colunas para acompanhar o progresso.",
+        cta: `<button class="icon-btn primary" data-action="add-in-col" data-value="todo"><i data-lucide="plus"></i> Criar primeira tarefa</button>`,
+      },
+      "no-tasks-table": {
+        icon: "table",
+        title: "Nenhuma tarefa por aqui ainda",
+        text: "Assim que você criar tarefas, elas aparecem aqui organizadas em lista.",
+        cta: `<button class="icon-btn primary" id="emptyAddTaskBtn"><i data-lucide="plus"></i> Criar primeira tarefa</button>`,
+      },
+      "no-tasks-calendar": {
+        icon: "calendar-days",
+        title: "Nada agendado ainda",
+        text: "Defina um prazo em alguma tarefa para vê-la aparecer no calendário.",
+        cta: `<button class="icon-btn primary" id="emptyAddTaskBtn"><i data-lucide="plus"></i> Criar tarefa com prazo</button>`,
+      },
+      "no-tasks-reports": {
+        icon: "file-text",
+        title: "Sem dados para relatar ainda",
+        text: "Crie e conclua algumas tarefas — o relatório é gerado a partir da atividade do espaço de trabalho.",
+        cta: "",
+      },
+    };
+    const k = kinds[kind] || kinds["no-workspace"];
+    return `<div class="empty">
+      <div class="empty-icon"><i data-lucide="${k.icon}"></i></div>
+      <h2>${k.title}</h2>
+      <p>${k.text}</p>
+      ${k.cta}
+    </div>`;
   }
 
   function renderView() {
@@ -387,62 +438,68 @@
     const task = findTask(state.openTaskId);
     if (!task) { overlay.classList.add("hidden"); overlay.innerHTML = ""; return; }
     overlay.classList.remove("hidden");
+    const doneItems = (task.checklist||[]).filter(c=>c.done).length;
     overlay.innerHTML = `
       <div id="taskModal">
-        <div class="modal-top">
-          <input id="tmTitle" value="${esc(task.title)}">
-          <button class="icon-btn" data-action="close-task"><i data-lucide="x"></i></button>
+        <div class="tm-header">
+          <button class="icon-btn" data-action="close-task" title="Fechar (Esc)"><i data-lucide="arrow-right"></i></button>
+          <div class="tm-header-spacer"></div>
+          ${task.checklist && task.checklist.length ? `<span class="tcard-sub"><i data-lucide="check-square" style="width:13px;height:13px"></i> ${doneItems}/${task.checklist.length}</span>` : ""}
         </div>
-        <div class="modal-grid">
-          <div>
-            <div class="field-label">Conteúdo</div>
-            <div id="blockEditor">${task.content.map(blockHTML).join("")}</div>
-            <div class="add-block-row">
-              <button data-action="add-block" data-type="paragraph"><i data-lucide="text"></i> Texto</button>
-              <button data-action="add-block" data-type="heading"><i data-lucide="heading"></i> Título</button>
-              <button data-action="add-block" data-type="todo"><i data-lucide="check-square"></i> Checklist item</button>
-            </div>
-
-            <div class="field-label">Checklist rápida</div>
-            <div class="checklist-items">
-              ${(task.checklist||[]).map(c => `
-                <div class="checklist-item">
-                  <input type="checkbox" data-action="toggle-check" data-item-id="${c.id}" ${c.done?"checked":""}>
-                  <span class="${c.done?"done":""}">${esc(c.text)}</span>
-                  <button class="icon-btn" data-action="delete-check" data-item-id="${c.id}"><i data-lucide="x"></i></button>
-                </div>`).join("")}
-            </div>
-            <form class="inline-form" id="checklistForm"><input placeholder="Adicionar item..." id="checklistInput"><button type="submit"><i data-lucide="plus"></i></button></form>
-
-            <div class="field-label">Anexos</div>
-            <div class="attachments">
-              ${(task.attachments||[]).map(a => `
-                <div class="attachment" title="${esc(a.name)}">
-                  ${a.blob && a.type && a.type.startsWith("image/") ? `<img src="${a.url}">` : `<i data-lucide="file"></i>`}
-                  <button class="att-del" data-action="delete-attachment" data-att-id="${a.id}"><i data-lucide="x" style="width:10px;height:10px"></i></button>
-                </div>`).join("")}
-              <div class="attachment-add" data-action="add-attachment"><i data-lucide="plus"></i></div>
-            </div>
-
-            <div class="field-label">Histórico de atividade</div>
-            <div class="activity-list">
-              ${(task.activity||[]).map(a => `<div class="activity-item"><span class="ts">${fmtDateTime(a.ts)}</span>${esc(a.text)}</div>`).join("") || `<div class="activity-item">Sem atividade registrada.</div>`}
-            </div>
+        <input id="tmTitle" value="${esc(task.title)}" placeholder="Título da tarefa">
+        <div class="tm-meta-bar">
+          <select id="tmStatus" class="meta-select">${STATUS.map(s => `<option value="${s.id}" ${s.id===task.status?"selected":""}>${s.label}</option>`).join("")}</select>
+          <select id="tmPriority" class="meta-select">${PRIORITY.map(p => `<option value="${p.id}" ${p.id===task.priority?"selected":""}>${p.label}</option>`).join("")}</select>
+          <input type="date" id="tmDue" class="meta-select" value="${task.dueDate||""}">
+        </div>
+        <div class="tm-body">
+          <div class="field-label">Conteúdo</div>
+          <div id="blockEditor">${task.content.map(blockHTML).join("")}</div>
+          <div class="add-block-row">
+            <button data-action="add-block" data-type="paragraph"><i data-lucide="text"></i> Texto</button>
+            <button data-action="add-block" data-type="heading"><i data-lucide="heading"></i> Título</button>
+            <button data-action="add-block" data-type="todo"><i data-lucide="check-square"></i> Checklist item</button>
           </div>
 
-          <div class="side-field">
-            <div class="field-label">Status</div>
-            <select id="tmStatus">${STATUS.map(s => `<option value="${s.id}" ${s.id===task.status?"selected":""}>${s.label}</option>`).join("")}</select>
-            <div class="field-label">Prioridade</div>
-            <select id="tmPriority">${PRIORITY.map(p => `<option value="${p.id}" ${p.id===task.priority?"selected":""}>${p.label}</option>`).join("")}</select>
-            <div class="field-label">Prazo</div>
-            <input type="date" id="tmDue" value="${task.dueDate||""}">
-            <button class="danger-btn" data-action="delete-task"><i data-lucide="trash-2"></i> Excluir tarefa</button>
+          <div class="field-label">Checklist rápida</div>
+          <div class="checklist-items">
+            ${(task.checklist||[]).map(c => `
+              <div class="checklist-item">
+                <input type="checkbox" data-action="toggle-check" data-item-id="${c.id}" ${c.done?"checked":""}>
+                <span class="${c.done?"done":""}">${esc(c.text)}</span>
+                <button class="icon-btn" data-action="delete-check" data-item-id="${c.id}"><i data-lucide="x"></i></button>
+              </div>`).join("") || `<p style="color:var(--text-faint);font-size:var(--fs-sm);margin:0">Nenhum item ainda.</p>`}
           </div>
+          <form class="inline-form" id="checklistForm"><input placeholder="Adicionar item..." id="checklistInput"><button type="submit"><i data-lucide="plus"></i></button></form>
+
+          <div class="field-label">Anexos</div>
+          <div class="attachments">
+            ${(task.attachments||[]).map(a => `
+              <div class="attachment" title="${esc(a.name)}">
+                ${a.blob && a.type && a.type.startsWith("image/") ? `<img src="${a.url}">` : `<i data-lucide="file"></i>`}
+                <button class="att-del" data-action="delete-attachment" data-att-id="${a.id}"><i data-lucide="x" style="width:10px;height:10px"></i></button>
+              </div>`).join("")}
+            <div class="attachment-add" data-action="add-attachment"><i data-lucide="plus"></i></div>
+          </div>
+
+          <div class="field-label">Histórico de atividade</div>
+          <div class="activity-list">
+            ${(task.activity||[]).map(a => `<div class="activity-item"><span class="ts">${fmtDateTime(a.ts)}</span>${esc(a.text)}</div>`).join("") || `<div class="activity-item">Sem atividade registrada.</div>`}
+          </div>
+        </div>
+        <div class="tm-footer">
+          <button class="danger-btn" data-action="delete-task"><i data-lucide="trash-2"></i> Excluir tarefa</button>
         </div>
       </div>`;
     icons();
+    applyMetaSelectColors(task);
     wireTaskModalEvents(task);
+  }
+
+  function applyMetaSelectColors(task) {
+    const s = STATUS.find(x => x.id === task.status);
+    const statusEl = $("#tmStatus");
+    if (statusEl && s) { statusEl.style.background = `color-mix(in srgb, ${s.color} 16%, var(--surface-2))`; statusEl.style.color = s.color; }
   }
 
   function blockHTML(b) {
@@ -453,7 +510,7 @@
 
   function wireTaskModalEvents(task) {
     $("#tmTitle").addEventListener("change", async (e) => { task.title = e.target.value.trim() || "Sem título"; await saveTask(task); renderSidebarSafe(); renderView(); });
-    $("#tmStatus").addEventListener("change", async (e) => { logActivity(task, `Status alterado para "${STATUS.find(s=>s.id===e.target.value).label}"`); task.status = e.target.value; await saveTask(task); renderView(); renderTaskModal(); });
+    $("#tmStatus").addEventListener("change", async (e) => { logActivity(task, `Status alterado para "${STATUS.find(s=>s.id===e.target.value).label}"`); task.status = e.target.value; await saveTask(task); applyMetaSelectColors(task); renderView(); renderTaskModal(); });
     $("#tmPriority").addEventListener("change", async (e) => { task.priority = e.target.value; await saveTask(task); renderView(); });
     $("#tmDue").addEventListener("change", async (e) => { task.dueDate = e.target.value; await saveTask(task); renderView(); });
 
@@ -501,23 +558,52 @@
   function openSearch() {
     $("#searchOverlay").classList.remove("hidden");
     $("#searchInput").value = "";
+    state.searchActiveIndex = 0;
     renderSearchResults("");
     setTimeout(() => $("#searchInput").focus(), 0);
   }
   function closeSearch() { $("#searchOverlay").classList.add("hidden"); }
+
+  function highlightMatch(text, query) {
+    if (!query) return esc(text);
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return esc(text);
+    return esc(text.slice(0, idx)) + "<mark>" + esc(text.slice(idx, idx + query.length)) + "</mark>" + esc(text.slice(idx + query.length));
+  }
+
   function renderSearchResults(q) {
     const query = q.trim().toLowerCase();
-    const results = !query ? state.tasks.slice(0, 8) : state.tasks.filter(t => {
+    const results = !query ? state.tasks.slice().sort((a,b)=>b.updatedAt-a.updatedAt).slice(0, 8) : state.tasks.filter(t => {
       const inTitle = t.title.toLowerCase().includes(query);
       const inContent = (t.content || []).some(b => (b.text || "").toLowerCase().includes(query));
       return inTitle || inContent;
     }).slice(0, 20);
-    $("#searchResults").innerHTML = results.length ? results.map(t => `
-      <div class="sr-item" data-action="open-task" data-task-id="${t.id}">
-        <i data-lucide="file-text"></i><span>${esc(t.title)}</span>
-        <span style="margin-left:auto;color:var(--text-dim);font-size:11px">${STATUS.find(s=>s.id===t.status)?.label||""}</span>
-      </div>`).join("") : `<div class="sr-empty">Nenhum resultado.</div>`;
+    state.searchResultsCache = results;
+    if (state.searchActiveIndex >= results.length) state.searchActiveIndex = Math.max(0, results.length - 1);
+    $("#searchResults").innerHTML = results.length ? results.map((t, i) => `
+      <div class="sr-item ${i === state.searchActiveIndex ? "active" : ""}" data-action="open-task" data-task-id="${t.id}" data-index="${i}">
+        <i class="sr-icon" data-lucide="file-text"></i><span>${highlightMatch(t.title, q.trim())}</span>
+        <span class="sr-status">${STATUS.find(s=>s.id===t.status)?.label||""}</span>
+      </div>`).join("") : `<div class="sr-empty">${query ? `Nenhum resultado para "${esc(q.trim())}".` : "Comece a digitar para buscar."}</div>`;
     icons();
+  }
+
+  function moveSearchActive(delta) {
+    const results = state.searchResultsCache || [];
+    if (!results.length) return;
+    state.searchActiveIndex = (state.searchActiveIndex + delta + results.length) % results.length;
+    $$("#searchResults .sr-item").forEach((el, i) => el.classList.toggle("active", i === state.searchActiveIndex));
+    const activeEl = $(`#searchResults .sr-item[data-index="${state.searchActiveIndex}"]`);
+    if (activeEl) activeEl.scrollIntoView({ block: "nearest" });
+  }
+
+  function openActiveSearchResult() {
+    const results = state.searchResultsCache || [];
+    const t = results[state.searchActiveIndex];
+    if (!t) return;
+    state.openTaskId = t.id;
+    closeSearch();
+    renderTaskModal();
   }
 
   /* ================= workspace form ================= */
@@ -527,6 +613,7 @@
     overlay.innerHTML = `
       <div class="simple-box">
         <h3>Novo espaço de trabalho</h3>
+        <p class="hint">Cada espaço guarda seu próprio quadro, tarefas e prazos — separados dos demais.</p>
         <input id="wsNameInput" placeholder="Ex: Pessoal, Vendas...">
         <div class="row">
           <button data-action="cancel-ws">Cancelar</button>
@@ -651,7 +738,12 @@
 
     $("#searchOpenBtn").addEventListener("click", openSearch);
     $("#searchOverlay").addEventListener("click", (e) => { if (e.target.id === "searchOverlay") closeSearch(); });
-    $("#searchInput").addEventListener("input", (e) => renderSearchResults(e.target.value));
+    $("#searchInput").addEventListener("input", (e) => { state.searchActiveIndex = 0; renderSearchResults(e.target.value); });
+    $("#searchInput").addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); moveSearchActive(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); moveSearchActive(-1); }
+      else if (e.key === "Enter") { e.preventDefault(); openActiveSearchResult(); }
+    });
     document.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openSearch(); }
       if (e.key === "Escape") { closeSearch(); if (state.openTaskId) { state.openTaskId = null; renderTaskModal(); renderView(); } }

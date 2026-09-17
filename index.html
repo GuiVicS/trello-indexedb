@@ -45,8 +45,16 @@
 <div id="taskOverlay" class="overlay hidden"></div>
 <div id="searchOverlay" class="hidden">
   <div id="searchModal">
-    <input id="searchInput" placeholder="Buscar tarefas por título ou conteúdo...">
+    <div id="searchInputRow">
+      <i data-lucide="search"></i>
+      <input id="searchInput" placeholder="Buscar tarefas por título ou conteúdo...">
+    </div>
     <div id="searchResults"></div>
+    <div id="searchFooter">
+      <span><kbd>↑↓</kbd>navegar</span>
+      <span><kbd>Enter</kbd>abrir</span>
+      <span><kbd>Esc</kbd>fechar</span>
+    </div>
   </div>
 </div>
 <div id="wsFormOverlay" class="simple-overlay hidden"></div>
