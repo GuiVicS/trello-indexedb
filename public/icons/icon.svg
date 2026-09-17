@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#3B5BFF"/>
-  <text x="50%" y="58%" font-size="270" text-anchor="middle" dominant-baseline="middle">✅</text>
+  <rect width="512" height="512" rx="112" fill="#111111"/>
+  <rect x="108" y="256" width="72" height="140" rx="36" fill="#5C5C5C"/>
+  <rect x="220" y="176" width="72" height="220" rx="36" fill="#B3B3B3"/>
+  <rect x="332" y="96" width="72" height="300" rx="36" fill="#FFFFFF"/>
 </svg>
