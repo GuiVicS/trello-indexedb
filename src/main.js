@@ -1,5 +1,20 @@
+import {
+  createIcons,
+  AlertTriangle, ArrowRight, Briefcase, Calendar, CalendarDays, CheckCheck,
+  CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Columns3,
+  Download, File, FileText, Heading, LayoutDashboard, ListChecks, LoaderCircle,
+  Moon, Paperclip, Plus, Search, Sparkles, Sun, Table, Text, Trash2, X,
+} from "lucide";
+
 (function () {
   "use strict";
+
+  const LUCIDE_ICONS = {
+    AlertTriangle, ArrowRight, Briefcase, Calendar, CalendarDays, CheckCheck,
+    CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Columns3,
+    Download, File, FileText, Heading, LayoutDashboard, ListChecks, LoaderCircle,
+    Moon, Paperclip, Plus, Search, Sparkles, Sun, Table, Text, Trash2, X,
+  };
 
   /* ================= utils ================= */
   const uid = () => (crypto.randomUUID ? crypto.randomUUID() : "id-" + Date.now() + "-" + Math.random().toString(16).slice(2));
@@ -9,7 +24,7 @@
   const todayStr = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
   const fmtDate = (iso) => { if(!iso) return ""; const [y,m,d]=iso.split("-"); return `${d}/${m}/${y}`; };
   const fmtDateTime = (ts) => { const d = new Date(ts); return d.toLocaleDateString("pt-BR")+" "+d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); };
-  const icons = () => { try { lucide.createIcons(); } catch(e) {} };
+  const icons = () => { try { createIcons({ icons: LUCIDE_ICONS }); } catch(e) {} };
 
   const STATUS = [
     { id: "todo", label: "A Fazer", color: "#6B6659" },
@@ -54,13 +69,38 @@
   async function tx(name, mode) { const db = await openDB(); return db.transaction(name, mode).objectStore(name); }
   async function dbGetAll(store) { const s = await tx(store, "readonly"); return new Promise((res, rej) => { const r = s.getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); }); }
   async function dbGetByIndex(store, index, value) { const s = await tx(store, "readonly"); return new Promise((res, rej) => { const r = s.index(index).getAll(value); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); }); }
-  async function dbPut(store, obj) { const s = await tx(store, "readwrite"); return new Promise((res, rej) => { const r = s.put(obj); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); }
+  async function dbPut(store, obj) {
+    const s = await tx(store, "readwrite");
+    return new Promise((res, rej) => {
+      const r = s.put(obj);
+      r.onsuccess = () => res();
+      r.onerror = () => { handleDbWriteError(r.error); rej(r.error); };
+    });
+  }
   async function dbDelete(store, id) { const s = await tx(store, "readwrite"); return new Promise((res, rej) => { const r = s.delete(id); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); }
+
+  function handleDbWriteError(err) {
+    if (err && err.name === "QuotaExceededError") showStorageFullBanner();
+  }
+  function showStorageFullBanner() {
+    let bar = $("#storageFullBanner");
+    if (bar) return;
+    bar = document.createElement("div");
+    bar.id = "storageFullBanner";
+    bar.className = "storage-banner";
+    bar.textContent = "O armazenamento do navegador está cheio — a última alteração pode não ter sido salva. Libere espaço ou exporte/limpe dados antigos.";
+    document.body.appendChild(bar);
+  }
   async function dbGetMeta(key, fallback) { try { const s = await tx("meta","readonly"); return await new Promise((res,rej)=>{ const r=s.get(key); r.onsuccess=()=>res(r.result?r.result.value:fallback); r.onerror=()=>rej(r.error); }); } catch(e){ return fallback; } }
   async function dbPutMeta(key, value) { try { const s = await tx("meta","readwrite"); await new Promise((res,rej)=>{ const r=s.put({key,value}); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); } catch(e){} }
 
   // pede armazenamento persistente pra reduzir chance de o navegador limpar os dados sozinho
-  if (navigator.storage && navigator.storage.persist) { navigator.storage.persist().catch(()=>{}); }
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persisted().then(already => {
+      if (already) return;
+      navigator.storage.persist().then(granted => { if (!granted) console.warn("Armazenamento persistente não concedido pelo navegador — dados offline podem ser apagados sob pressão de espaço."); }).catch(()=>{});
+    }).catch(()=>{});
+  }
 
   /* ================= state ================= */
   const state = {
@@ -95,7 +135,7 @@
     state.tasks = state.activeWorkspaceId ? await dbGetByIndex("tasks", "workspaceId", state.activeWorkspaceId) : [];
   }
 
-  async function saveTask(task) { task.updatedAt = Date.now(); await dbPut("tasks", task); }
+  async function saveTask(task) { task.updatedAt = Date.now(); try { await dbPut("tasks", task); } catch (e) { /* já sinalizado via banner de armazenamento cheio */ } }
 
   /* ================= seed ================= */
   async function seedIfEmpty() {

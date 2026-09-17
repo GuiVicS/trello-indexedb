@@ -351,3 +351,20 @@ table.tbl tbody tr:hover td { background: var(--accent-soft); cursor: pointer; }
   #viewArea { padding: var(--sp-4); }
   .report-metrics { grid-template-columns: repeat(2, 1fr); }
 }
+
+.storage-banner {
+  position: fixed;
+  left: 50%;
+  bottom: var(--sp-4, 16px);
+  transform: translateX(-50%);
+  max-width: 420px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md, 8px);
+  padding: var(--sp-3, 12px) var(--sp-4, 16px);
+  font-size: var(--fs-sm, 13px);
+  text-align: center;
+  z-index: 100;
+  box-shadow: var(--shadow-lg);
+}
