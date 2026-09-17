@@ -1,19 +1,21 @@
 import {
   createIcons,
   AlertTriangle, ArrowRight, ArrowLeftRight, Briefcase, Calendar, CalendarDays, CheckCheck,
-  CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Columns3,
+  CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Cloud, CloudOff, Columns3,
   Download, Eye, EyeOff, File, FileText, Heading, KeyRound, LayoutDashboard, ListChecks, LoaderCircle,
-  Menu, Moon, Paperclip, Plus, Save, Search, Settings, Sparkles, Sun, Table, Text, Trash2, Upload, X,
+  LogOut, Menu, Moon, Paperclip, Plus, Save, Search, Settings, ShieldCheck, Sparkles, Sun, Table, Text, Trash2, Upload, X,
 } from "lucide";
+import { loadStripe } from "@stripe/stripe-js";
+import * as cloud from "./lib/cloud.js";
 
 (function () {
   "use strict";
 
   const LUCIDE_ICONS = {
     AlertTriangle, ArrowRight, ArrowLeftRight, Briefcase, Calendar, CalendarDays, CheckCheck,
-    CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Columns3,
+    CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Cloud, CloudOff, Columns3,
     Download, Eye, EyeOff, File, FileText, Heading, KeyRound, LayoutDashboard, ListChecks, LoaderCircle,
-    Menu, Moon, Paperclip, Plus, Save, Search, Settings, Sparkles, Sun, Table, Text, Trash2, Upload, X,
+    LogOut, Menu, Moon, Paperclip, Plus, Save, Search, Settings, ShieldCheck, Sparkles, Sun, Table, Text, Trash2, Upload, X,
   };
 
   /* ================= utils ================= */
@@ -83,6 +85,7 @@ import {
   }
   async function tx(name, mode) { const db = await openDB(); return db.transaction(name, mode).objectStore(name); }
   async function dbGetAll(store) { const s = await tx(store, "readonly"); return new Promise((res, rej) => { const r = s.getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); }); }
+  async function dbGet(store, id) { const s = await tx(store, "readonly"); return new Promise((res, rej) => { const r = s.get(id); r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error); }); }
   async function dbGetByIndex(store, index, value) { const s = await tx(store, "readonly"); return new Promise((res, rej) => { const r = s.index(index).getAll(value); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); }); }
   async function dbPut(store, obj) {
     const s = await tx(store, "readwrite");
@@ -282,7 +285,16 @@ import {
     state.tasks = state.activeWorkspaceId ? await dbGetByIndex("tasks", "workspaceId", state.activeWorkspaceId) : [];
   }
 
-  async function saveTask(task) { task.updatedAt = Date.now(); try { await dbPut("tasks", task); } catch (e) { /* já sinalizado via banner de armazenamento cheio */ } }
+  async function saveTask(task) {
+    task.updatedAt = Date.now();
+    try { await dbPut("tasks", task); } catch (e) { /* já sinalizado via banner de armazenamento cheio */ }
+    cloud.pushTaskToCloud(task);
+  }
+  async function saveWorkspace(ws) {
+    ws.updatedAt = Date.now();
+    await dbPut("workspaces", ws);
+    cloud.pushWorkspaceToCloud(ws);
+  }
 
   /* ================= seed ================= */
   async function seedIfEmpty() {
@@ -321,12 +333,12 @@ import {
 
   function renderTopbar() {
     const topbar = $("#topbar");
-    const titles = { board: "Quadro", table: "Tabela", calendar: "Calendário", reports: "Relatórios", settings: "Configurações" };
+    const titles = { board: "Quadro", table: "Tabela", calendar: "Calendário", reports: "Relatórios", settings: "Configurações", signup: "Criar conta Cloud", login: "Entrar", checkout: "Assinar Cloud", admin: "Painel admin" };
     let extra = "";
     if (state.view === "board" && activeWorkspace()) {
       extra = `<select class="group-select" id="groupBySelect">${groupableDefs().map(g => `<option value="${g.id}" ${g.id===state.groupBy?"selected":""}>Agrupar por: ${g.label}</option>`).join("")}</select>`;
     }
-    const showNewTaskBtn = state.view !== "reports" && state.view !== "settings" && !!activeWorkspace();
+    const showNewTaskBtn = !["reports", "settings", "signup", "login", "checkout", "admin"].includes(state.view) && !!activeWorkspace();
     topbar.innerHTML = `
       <h1>${titles[state.view] || ""}</h1>
       ${extra}
@@ -666,12 +678,69 @@ import {
     else if (state.view === "calendar") renderCalendar(container);
     else if (state.view === "reports") renderReports(container);
     else if (state.view === "settings") renderSettings(container);
+    else if (state.view === "signup") renderSignup(container);
+    else if (state.view === "login") renderLogin(container);
+    else if (state.view === "checkout") renderCheckout(container);
+    else if (state.view === "admin") renderAdmin(container);
   }
 
   /* ================= configurações ================= */
+  function cloudCardHTML() {
+    if (!cloud.cloudAvailable()) return "";
+    const session = cloud.getSession();
+    const sub = cloud.getSubscription();
+    const active = cloud.isCloudActive();
+
+    if (active) {
+      return `
+        <section class="settings-card cloud-card cloud-card-active">
+          <h3><i data-lucide="cloud"></i> Cloud ativo</h3>
+          <p class="hint">Sincronizado com <strong>${esc(session.user.email)}</strong>. Suas tarefas continuam funcionando offline e sincronizam automaticamente quando a internet voltar.</p>
+          <div class="settings-row">
+            ${sub?.current_period_end ? `<span class="hint-inline">Renova em ${fmtDate(new Date(sub.current_period_end).toISOString().slice(0,10))}</span>` : ""}
+          </div>
+          <div class="settings-row" style="margin-top:var(--sp-3)">
+            <button class="icon-btn" data-action="cloud-sync-now"><i data-lucide="cloud"></i> Sincronizar agora</button>
+            <button class="icon-btn" data-action="cloud-signout"><i data-lucide="log-out"></i> Sair da conta Cloud</button>
+            ${cloud.isSuperadmin() ? `<button class="icon-btn" data-action="goto-admin"><i data-lucide="shield-check"></i> Painel admin</button>` : ""}
+          </div>
+        </section>`;
+    }
+
+    if (session && !active) {
+      return `
+        <section class="settings-card cloud-card">
+          <span class="news-badge">NOVO</span>
+          <h3><i data-lucide="cloud"></i> Falta pouco para ativar o Cloud</h3>
+          <p class="hint">Sua conta <strong>${esc(session.user.email)}</strong> já existe — falta só confirmar a assinatura para habilitar a sincronização.</p>
+          <div class="settings-row">
+            <button class="icon-btn primary" data-action="goto-checkout"><i data-lucide="cloud"></i> Finalizar assinatura — R$ 19,90/mês</button>
+            <button class="icon-btn" data-action="cloud-signout"><i data-lucide="log-out"></i> Sair</button>
+          </div>
+        </section>`;
+    }
+
+    return `
+      <section class="settings-card cloud-card">
+        <span class="news-badge">NOVO</span>
+        <h3><i data-lucide="cloud"></i> Tarefas na nuvem</h3>
+        <p class="hint">Hoje seus dados vivem só neste navegador. Habilitando o Cloud, eles passam a existir também numa conta segura na nuvem — e você pode:</p>
+        <ul class="cloud-benefits">
+          <li><i data-lucide="check-circle-2"></i> Acessar suas tarefas de qualquer aparelho, sem perder nada</li>
+          <li><i data-lucide="check-circle-2"></i> Continuar usando 100% offline — sincroniza sozinho quando a internet voltar</li>
+          <li><i data-lucide="check-circle-2"></i> Backup automático, sem precisar lembrar de exportar</li>
+        </ul>
+        <div class="settings-row">
+          <button class="icon-btn primary" data-action="goto-signup"><i data-lucide="cloud"></i> Habilitar Cloud — R$ 19,90/mês</button>
+          <button class="icon-btn" data-action="goto-login"><i data-lucide="log-out"></i> Já tenho conta</button>
+        </div>
+      </section>`;
+  }
+
   function renderSettings(container) {
     container.innerHTML = `
       <div class="settings-page">
+        ${cloudCardHTML()}
         <section class="settings-card">
           <h3><i data-lucide="download"></i> Backup dos dados</h3>
           <p class="hint">Baixe um arquivo .json com todos os espaços, tarefas e anexos — guarde em outro lugar como cópia de segurança.</p>
@@ -729,6 +798,188 @@ import {
       await dbPutMeta("groqApiKey", ""); await dbPutMeta("groqModel", "");
       renderSettings($("#viewArea"));
     });
+  }
+
+  /* ================= cloud: cadastro ================= */
+  function renderSignup(container) {
+    container.innerHTML = `
+      <div class="auth-page">
+        <div class="auth-card">
+          <h2><i data-lucide="cloud"></i> Criar conta Cloud</h2>
+          <p class="hint">Depois de criar a conta, você confirma o cartão numa tela segura para ativar a assinatura de R$ 19,90/mês.</p>
+          <form id="signupForm">
+            <label class="settings-label">Nome</label>
+            <input id="suName" required autocomplete="name">
+            <label class="settings-label">E-mail</label>
+            <input id="suEmail" type="email" required autocomplete="email">
+            <label class="settings-label">Telefone</label>
+            <input id="suPhone" required autocomplete="tel" placeholder="(11) 99999-9999">
+            <label class="settings-label">CPF</label>
+            <input id="suCpf" required inputmode="numeric" placeholder="000.000.000-00">
+            <label class="settings-label">Senha</label>
+            <input id="suPassword" type="password" required autocomplete="new-password" minlength="6">
+            <div id="signupError" class="auth-error hidden"></div>
+            <button class="icon-btn primary" type="submit" id="signupSubmitBtn"><i data-lucide="cloud"></i> Criar conta e continuar</button>
+          </form>
+          <p class="hint auth-switch">Já tem conta? <a href="#" data-action="goto-login">Entrar</a></p>
+        </div>
+      </div>`;
+    icons();
+    $("#signupForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = $("#signupSubmitBtn");
+      const errEl = $("#signupError");
+      errEl.classList.add("hidden");
+      btn.disabled = true;
+      try {
+        await cloud.signUpCloud({
+          name: $("#suName").value.trim(),
+          email: $("#suEmail").value.trim(),
+          phone: $("#suPhone").value.trim(),
+          cpf: $("#suCpf").value.trim(),
+          password: $("#suPassword").value,
+        });
+        if (!cloud.getSession()) {
+          errEl.textContent = "Conta criada! Confirme seu e-mail e depois faça login para continuar.";
+          errEl.classList.remove("hidden");
+          btn.disabled = false;
+          return;
+        }
+        state.view = "checkout";
+        renderView();
+      } catch (err) {
+        errEl.textContent = err.message || "Não foi possível criar sua conta.";
+        errEl.classList.remove("hidden");
+        btn.disabled = false;
+      }
+    });
+  }
+
+  /* ================= cloud: login ================= */
+  function renderLogin(container) {
+    container.innerHTML = `
+      <div class="auth-page">
+        <div class="auth-card">
+          <h2><i data-lucide="cloud"></i> Entrar no Cloud</h2>
+          <form id="loginForm">
+            <label class="settings-label">E-mail</label>
+            <input id="liEmail" type="email" required autocomplete="email">
+            <label class="settings-label">Senha</label>
+            <input id="liPassword" type="password" required autocomplete="current-password">
+            <div id="loginError" class="auth-error hidden"></div>
+            <button class="icon-btn primary" type="submit" id="loginSubmitBtn"><i data-lucide="cloud"></i> Entrar</button>
+          </form>
+          <p class="hint auth-switch">Ainda não tem conta? <a href="#" data-action="goto-signup">Criar conta</a></p>
+        </div>
+      </div>`;
+    icons();
+    $("#loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = $("#loginSubmitBtn");
+      const errEl = $("#loginError");
+      errEl.classList.add("hidden");
+      btn.disabled = true;
+      try {
+        await cloud.signInCloud({ email: $("#liEmail").value.trim(), password: $("#liPassword").value });
+        state.view = cloud.isCloudActive() ? "settings" : "checkout";
+        renderView();
+      } catch (err) {
+        errEl.textContent = err.message || "E-mail ou senha inválidos.";
+        errEl.classList.remove("hidden");
+        btn.disabled = false;
+      }
+    });
+  }
+
+  /* ================= cloud: checkout transparente ================= */
+  let stripeInstance = null;
+  let stripeElements = null;
+
+  function renderCheckout(container) {
+    if (!cloud.getSession()) { state.view = "login"; renderView(); return; }
+    container.innerHTML = `
+      <div class="auth-page">
+        <div class="auth-card">
+          <h2><i data-lucide="cloud"></i> Assinar Cloud — R$ 19,90/mês</h2>
+          <p class="hint">Pagamento processado com segurança pela Stripe. Seus dados de cartão nunca passam pelos nossos servidores.</p>
+          <div id="checkoutError" class="auth-error hidden"></div>
+          <div id="paymentElement" class="payment-element"><p class="hint">Carregando formulário de pagamento...</p></div>
+          <button class="icon-btn primary" id="confirmPaymentBtn" style="margin-top:var(--sp-3)" disabled><i data-lucide="cloud"></i> Confirmar assinatura</button>
+        </div>
+      </div>`;
+    icons();
+    setupCheckout().catch((err) => {
+      $("#checkoutError").textContent = err.message || "Não foi possível carregar o checkout.";
+      $("#checkoutError").classList.remove("hidden");
+    });
+  }
+
+  async function setupCheckout() {
+    const pubKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+    if (!pubKey) throw new Error("Checkout ainda não configurado (chave pública da Stripe ausente).");
+    const { clientSecret } = await cloud.createSubscriptionIntent();
+    stripeInstance = stripeInstance || await loadStripe(pubKey);
+    stripeElements = stripeInstance.elements({ clientSecret });
+    const paymentElement = stripeElements.create("payment");
+    paymentElement.mount("#paymentElement");
+    const btn = $("#confirmPaymentBtn");
+    btn.disabled = false;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const errEl = $("#checkoutError");
+      errEl.classList.add("hidden");
+      const { error } = await stripeInstance.confirmPayment({
+        elements: stripeElements,
+        confirmParams: { return_url: import.meta.env.VITE_APP_URL || window.location.href },
+        redirect: "if_required",
+      });
+      if (error) {
+        errEl.textContent = error.message || "Pagamento não aprovado.";
+        errEl.classList.remove("hidden");
+        btn.disabled = false;
+        return;
+      }
+      await cloud.refreshAfterCheckout();
+      try {
+        await cloud.migrateLocalToCloud(dbApi);
+      } catch (e) { console.warn("Migração para a nuvem falhou:", e.message); }
+      state.view = "settings";
+      renderView();
+    });
+  }
+
+  /* ================= cloud: painel admin ================= */
+  async function renderAdmin(container) {
+    if (!cloud.getSession()) { state.view = "login"; renderView(); return; }
+    container.innerHTML = `<p class="hint">Carregando assinaturas...</p>`;
+    try {
+      const session = cloud.getSession();
+      const res = await fetch("/api/admin/subscriptions", { headers: { Authorization: `Bearer ${session.access_token}` } });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "Acesso negado.");
+      const rows = body.subscriptions || [];
+      container.innerHTML = `
+        <div class="settings-page" style="max-width:900px">
+          <section class="settings-card">
+            <h3><i data-lucide="shield-check"></i> Assinaturas (${rows.length})</h3>
+            <table class="tbl">
+              <thead><tr><th>Nome</th><th>E-mail</th><th>Status</th><th>Renova em</th></tr></thead>
+              <tbody>
+                ${rows.map(r => `
+                  <tr>
+                    <td data-label="Nome">${esc(r.profiles?.name || "—")}</td>
+                    <td data-label="E-mail">${esc(r.profiles?.email || "—")}</td>
+                    <td data-label="Status"><span class="status-dot" style="--dot-color:${r.status === "active" ? "var(--status-done)" : "var(--priority-alta)"}">${esc(r.status)}</span></td>
+                    <td data-label="Renova em">${r.current_period_end ? fmtDate(r.current_period_end.slice(0,10)) : "—"}</td>
+                  </tr>`).join("") || `<tr><td colspan="4">Nenhuma assinatura ainda.</td></tr>`}
+              </tbody>
+            </table>
+          </section>
+        </div>`;
+      icons();
+    } catch (err) {
+      container.innerHTML = `<p class="hint" style="color:var(--danger)">${esc(err.message)}</p>`;
+    }
   }
 
   /* ================= task modal ================= */
@@ -861,7 +1112,7 @@ import {
       ws.labels.push(newTag);
       task.tags = task.tags || [];
       task.tags.push(newTag.id);
-      await dbPut("workspaces", ws);
+      await saveWorkspace(ws);
       await saveTask(task);
       renderView(); renderTaskModal();
     });
@@ -999,6 +1250,7 @@ import {
     document.body.addEventListener("click", async (e) => {
       const t = e.target.closest("[data-action]");
       if (!t) return;
+      if (t.tagName === "A") e.preventDefault();
       const action = t.dataset.action;
       switch (action) {
         case "select-ws":
@@ -1029,7 +1281,7 @@ import {
           const name = $("#wsNameInput").value.trim();
           if (!name) return;
           const ws = makeWorkspace(name);
-          await dbPut("workspaces", ws);
+          await saveWorkspace(ws);
           state.workspaces.push(ws);
           state.activeWorkspaceId = ws.id;
           await dbPutMeta("activeWorkspaceId", ws.id);
@@ -1043,6 +1295,7 @@ import {
         case "delete-task": {
           if (!confirm("Excluir esta tarefa?")) return;
           await dbDelete("tasks", state.openTaskId);
+          cloud.deleteTaskFromCloud(state.openTaskId);
           state.tasks = state.tasks.filter(tk => tk.id !== state.openTaskId);
           state.openTaskId = null;
           renderTaskModal(); renderView();
@@ -1084,7 +1337,7 @@ import {
           const name = prompt("Nome da nova coluna:");
           if (!name || !name.trim()) return;
           currentStatuses().push({ id: uid(), label: name.trim(), color: "var(--text-dim)" });
-          await dbPut("workspaces", ws);
+          await saveWorkspace(ws);
           renderView();
           break;
         }
@@ -1099,7 +1352,7 @@ import {
           const fallbackId = ws.statuses[0].id;
           const affected = state.tasks.filter(tk => tk.status === removedId);
           for (const tk of affected) { tk.status = fallbackId; await saveTask(tk); }
-          await dbPut("workspaces", ws);
+          await saveWorkspace(ws);
           renderView();
           break;
         }
@@ -1133,7 +1386,7 @@ import {
           if (!ws || !confirm("Excluir esta tag? Ela será removida de todas as tarefas.")) return;
           const tid = t.dataset.tagId;
           ws.labels = (ws.labels || []).filter(l => l.id !== tid);
-          await dbPut("workspaces", ws);
+          await saveWorkspace(ws);
           for (const tk of state.tasks) {
             if (tk.tags && tk.tags.includes(tid)) { tk.tags = tk.tags.filter(id => id !== tid); await saveTask(tk); }
           }
@@ -1142,6 +1395,18 @@ import {
         }
         case "download-backup": exportBackup(); break;
         case "restore-backup": $("#restoreFileInput").click(); break;
+        case "goto-signup": state.view = "signup"; renderView(); break;
+        case "goto-login": state.view = "login"; renderView(); break;
+        case "goto-checkout": state.view = "checkout"; renderView(); break;
+        case "goto-admin": state.view = "admin"; renderView(); break;
+        case "cloud-signout": await cloud.signOutCloud(); renderView(); break;
+        case "cloud-sync-now": {
+          t.disabled = true;
+          try { await cloud.pullCloudChanges(dbApi); await loadWorkspaceTasks(); } catch (err) { console.warn(err.message); }
+          t.disabled = false;
+          renderSidebar(); renderView();
+          break;
+        }
       }
     });
 
@@ -1156,7 +1421,7 @@ import {
       if (e.target.matches('[data-action="rename-col"]')) {
         const ws = activeWorkspace();
         const col = (ws?.statuses || []).find(c => c.id === e.target.dataset.value);
-        if (col) { col.label = e.target.value.trim() || col.label; await dbPut("workspaces", ws); renderSidebar(); }
+        if (col) { col.label = e.target.value.trim() || col.label; await saveWorkspace(ws); renderSidebar(); }
       }
       if (e.target.id === "restoreFileInput") {
         const file = e.target.files && e.target.files[0];
@@ -1194,6 +1459,8 @@ import {
   }
 
   /* ================= init ================= */
+  const dbApi = { dbGetAll, dbGet, dbPut };
+
   async function init() {
     const savedTheme = await dbGetMeta("theme", null);
     setTheme(savedTheme || "light");
@@ -1206,6 +1473,18 @@ import {
     wireGlobalEvents();
     renderSidebar();
     renderView();
+
+    if (cloud.cloudAvailable()) {
+      await cloud.initCloud();
+      cloud.setupOnlineSync(dbApi);
+      if (cloud.isCloudActive()) {
+        await cloud.pullCloudChanges(dbApi);
+        await loadWorkspaceTasks();
+      }
+      cloud.onCloudChange(() => {
+        if (["settings", "login", "signup", "checkout", "admin"].includes(state.view)) renderView();
+      });
+    }
   }
 
   document.addEventListener("DOMContentLoaded", init);
