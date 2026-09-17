@@ -1,19 +1,19 @@
 import {
   createIcons,
-  AlertTriangle, ArrowRight, Briefcase, Calendar, CalendarDays, CheckCheck,
+  AlertTriangle, ArrowRight, ArrowLeftRight, Briefcase, Calendar, CalendarDays, CheckCheck,
   CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Columns3,
-  Download, File, FileText, Heading, LayoutDashboard, ListChecks, LoaderCircle,
-  Moon, Paperclip, Plus, Search, Sparkles, Sun, Table, Text, Trash2, X,
+  Download, Eye, EyeOff, File, FileText, Heading, KeyRound, LayoutDashboard, ListChecks, LoaderCircle,
+  Menu, Moon, Paperclip, Plus, Save, Search, Settings, Sparkles, Sun, Table, Text, Trash2, Upload, X,
 } from "lucide";
 
 (function () {
   "use strict";
 
   const LUCIDE_ICONS = {
-    AlertTriangle, ArrowRight, Briefcase, Calendar, CalendarDays, CheckCheck,
+    AlertTriangle, ArrowRight, ArrowLeftRight, Briefcase, Calendar, CalendarDays, CheckCheck,
     CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Columns3,
-    Download, File, FileText, Heading, LayoutDashboard, ListChecks, LoaderCircle,
-    Moon, Paperclip, Plus, Search, Sparkles, Sun, Table, Text, Trash2, X,
+    Download, Eye, EyeOff, File, FileText, Heading, KeyRound, LayoutDashboard, ListChecks, LoaderCircle,
+    Menu, Moon, Paperclip, Plus, Save, Search, Settings, Sparkles, Sun, Table, Text, Trash2, Upload, X,
   };
 
   /* ================= utils ================= */
@@ -26,7 +26,7 @@ import {
   const fmtDateTime = (ts) => { const d = new Date(ts); return d.toLocaleDateString("pt-BR")+" "+d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); };
   const icons = () => { try { createIcons({ icons: LUCIDE_ICONS }); } catch(e) {} };
 
-  const STATUS = [
+  const DEFAULT_STATUSES = [
     { id: "todo", label: "A Fazer", color: "var(--status-todo)" },
     { id: "doing", label: "Em Andamento", color: "var(--status-doing)" },
     { id: "done", label: "Concluído", color: "var(--status-done)" },
@@ -38,10 +38,25 @@ import {
     { id: "alta", label: "Alta" },
     { id: "urgente", label: "Urgente" },
   ];
-  const GROUPABLE = [
-    { id: "status", label: "Status", options: STATUS },
-    { id: "priority", label: "Prioridade", options: PRIORITY.map(p => ({ id: p.id, label: p.label, color: "var(--text-dim)" })) },
-  ];
+  const TAG_COLORS = ["#8A8A8A", "#5C5C5C", "#B3B3B3", "#111111", "#6E6E6E", "#9C9C9C", "#3A3A3A", "#D0D0D0"];
+
+  // colunas (status) agora são personalizáveis por espaço de trabalho — isso retorna
+  // as colunas do espaço ativo, migrando espaços antigos que ainda não têm `statuses`
+  function currentStatuses() {
+    const ws = activeWorkspace();
+    if (!ws) return DEFAULT_STATUSES;
+    if (!ws.statuses || !ws.statuses.length) {
+      ws.statuses = DEFAULT_STATUSES.map(s => ({ ...s }));
+      dbPut("workspaces", ws);
+    }
+    return ws.statuses;
+  }
+  function groupableDefs() {
+    return [
+      { id: "status", label: "Status", options: currentStatuses() },
+      { id: "priority", label: "Prioridade", options: PRIORITY.map(p => ({ id: p.id, label: p.label, color: "var(--text-dim)" })) },
+    ];
+  }
 
   /* ================= IndexedDB ================= */
   const DB_NAME = "tarefasAppDB";
@@ -94,6 +109,135 @@ import {
   async function dbGetMeta(key, fallback) { try { const s = await tx("meta","readonly"); return await new Promise((res,rej)=>{ const r=s.get(key); r.onsuccess=()=>res(r.result?r.result.value:fallback); r.onerror=()=>rej(r.error); }); } catch(e){ return fallback; } }
   async function dbPutMeta(key, value) { try { const s = await tx("meta","readwrite"); await new Promise((res,rej)=>{ const r=s.put({key,value}); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); } catch(e){} }
 
+  /* ================= backup: exportar / restaurar ================= */
+  async function blobToBase64(blob) {
+    const buf = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+  function base64ToBlob(b64, type) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type });
+  }
+
+  async function exportBackup() {
+    const workspaces = await dbGetAll("workspaces");
+    const tasksRaw = await dbGetAll("tasks");
+    const tasks = await Promise.all(tasksRaw.map(async (t) => {
+      const clone = { ...t };
+      if (clone.attachments && clone.attachments.length) {
+        clone.attachments = await Promise.all(clone.attachments.map(async (a) => {
+          const { blob, url, ...rest } = a;
+          if (blob) rest.dataBase64 = await blobToBase64(blob);
+          return rest;
+        }));
+      }
+      return clone;
+    }));
+    const payload = { app: "tarefas-app", version: 1, exportedAt: new Date().toISOString(), workspaces, tasks };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `tarefas-backup-${todayStr()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  async function restoreBackup(file) {
+    let json;
+    try {
+      json = JSON.parse(await file.text());
+    } catch (e) {
+      alert("Arquivo inválido: não é um JSON de backup reconhecível.");
+      return;
+    }
+    if (!json || !Array.isArray(json.workspaces) || !Array.isArray(json.tasks)) {
+      alert("Arquivo inválido: estrutura de backup não reconhecida.");
+      return;
+    }
+    if (!confirm(`Restaurar este backup vai substituir todos os espaços e tarefas atuais por ${json.workspaces.length} espaço(s) e ${json.tasks.length} tarefa(s) do arquivo. Continuar?`)) return;
+
+    const existingWs = await dbGetAll("workspaces");
+    const existingTasks = await dbGetAll("tasks");
+    for (const w of existingWs) await dbDelete("workspaces", w.id);
+    for (const t of existingTasks) await dbDelete("tasks", t.id);
+
+    for (const w of json.workspaces) await dbPut("workspaces", w);
+    for (const raw of json.tasks) {
+      const task = { ...raw };
+      if (task.attachments && task.attachments.length) {
+        task.attachments = task.attachments.map((a) => {
+          if (a.dataBase64) {
+            const blob = base64ToBlob(a.dataBase64, a.type || "application/octet-stream");
+            const { dataBase64, ...rest } = a;
+            return { ...rest, blob, url: URL.createObjectURL(blob) };
+          }
+          return a;
+        });
+      }
+      await dbPut("tasks", task);
+    }
+    alert("Backup restaurado com sucesso. O app vai recarregar.");
+    location.reload();
+  }
+
+  /* ================= relatório com IA (Groq) ================= */
+  function mdToHtml(md) {
+    const lines = String(md || "").split("\n");
+    let html = "", inList = false;
+    const closeList = () => { if (inList) { html += "</ul>"; inList = false; } };
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) { closeList(); continue; }
+      if (line.startsWith("### ")) { closeList(); html += `<h4>${esc(line.slice(4))}</h4>`; }
+      else if (line.startsWith("## ")) { closeList(); html += `<h3>${esc(line.slice(3))}</h3>`; }
+      else if (line.startsWith("# ")) { closeList(); html += `<h2>${esc(line.slice(2))}</h2>`; }
+      else if (/^[-*]\s+/.test(line)) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${esc(line.replace(/^[-*]\s+/, ""))}</li>`; }
+      else { closeList(); html += `<p>${esc(line).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")}</p>`; }
+    }
+    closeList();
+    return html;
+  }
+
+  async function callGroq(prompt) {
+    const key = state.groqApiKey || (await dbGetMeta("groqApiKey", ""));
+    if (!key) throw new Error("Nenhuma chave de API do Groq configurada. Vá em Configurações.");
+    const model = state.groqModel || (await dbGetMeta("groqModel", "")) || "llama-3.3-70b-versatile";
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        temperature: 0.4,
+        messages: [
+          { role: "system", content: "Você é um assistente que gera relatórios de produtividade em português do Brasil, objetivos e bem estruturados em Markdown simples (títulos com ##, listas com -)." },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(`Groq respondeu ${res.status}. ${errText.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || "";
+  }
+
+  function buildReportPrompt(from, to, tasks) {
+    const lines = tasks.map((t) => {
+      const chk = t.checklist || [];
+      const done = chk.filter((c) => c.done).length;
+      return `- [${t.status}] ${t.title} | prioridade: ${t.priority} | prazo: ${t.dueDate || "—"} | checklist: ${done}/${chk.length}`;
+    }).join("\n");
+    return `Gere um relatório de produtividade em Markdown para o período de ${fmtDate(from)} a ${fmtDate(to)}, a partir destas tarefas:\n\n${lines || "(nenhuma tarefa no período)"}\n\nEstruture com as seções: ## Resumo executivo, ## Concluído, ## Em andamento, ## Atrasado, ## A fazer. Seja conciso e use listas.`;
+  }
+
   // pede armazenamento persistente pra reduzir chance de o navegador limpar os dados sozinho
   if (navigator.storage && navigator.storage.persist) {
     navigator.storage.persisted().then(already => {
@@ -114,17 +258,20 @@ import {
     openTaskId: null,
     theme: "light",
     dragging: null,
+    groqApiKey: "",
+    groqModel: "",
+    moveTaskId: null,
   };
 
   function activeWorkspace() { return state.workspaces.find(w => w.id === state.activeWorkspaceId) || null; }
   function findTask(id) { return state.tasks.find(t => t.id === id) || null; }
   function logActivity(task, text) { task.activity = task.activity || []; task.activity.unshift({ id: uid(), ts: Date.now(), text }); }
 
-  function makeWorkspace(name) { return { id: uid(), name: name || "Meu espaço", labels: [], createdAt: Date.now() }; }
+  function makeWorkspace(name) { return { id: uid(), name: name || "Meu espaço", labels: [], statuses: DEFAULT_STATUSES.map(s => ({ ...s })), createdAt: Date.now() }; }
   function makeTask(workspaceId, title) {
     return {
       id: uid(), workspaceId, title: title || "Nova tarefa",
-      status: "todo", priority: "none", dueDate: "",
+      status: "todo", priority: "none", dueDate: "", tags: [],
       content: [{ id: uid(), type: "paragraph", text: "" }],
       checklist: [], attachments: [], activity: [],
       createdAt: Date.now(), updatedAt: Date.now(),
@@ -174,12 +321,12 @@ import {
 
   function renderTopbar() {
     const topbar = $("#topbar");
-    const titles = { board: "Quadro", table: "Tabela", calendar: "Calendário", reports: "Relatórios" };
+    const titles = { board: "Quadro", table: "Tabela", calendar: "Calendário", reports: "Relatórios", settings: "Configurações" };
     let extra = "";
     if (state.view === "board" && activeWorkspace()) {
-      extra = `<select class="group-select" id="groupBySelect">${GROUPABLE.map(g => `<option value="${g.id}" ${g.id===state.groupBy?"selected":""}>Agrupar por: ${g.label}</option>`).join("")}</select>`;
+      extra = `<select class="group-select" id="groupBySelect">${groupableDefs().map(g => `<option value="${g.id}" ${g.id===state.groupBy?"selected":""}>Agrupar por: ${g.label}</option>`).join("")}</select>`;
     }
-    const showNewTaskBtn = state.view !== "reports" && !!activeWorkspace();
+    const showNewTaskBtn = state.view !== "reports" && state.view !== "settings" && !!activeWorkspace();
     topbar.innerHTML = `
       <h1>${titles[state.view] || ""}</h1>
       ${extra}
@@ -208,7 +355,8 @@ import {
     const ws = activeWorkspace();
     if (!ws) { container.innerHTML = emptyStateHTML("no-workspace"); icons(); return; }
     if (state.tasks.length === 0) { container.innerHTML = emptyStateHTML("no-tasks-board"); icons(); return; }
-    const group = GROUPABLE.find(g => g.id === state.groupBy);
+    const group = groupableDefs().find(g => g.id === state.groupBy);
+    const canManageCols = group.id === "status";
     const wrap = document.createElement("div");
     wrap.id = "boardView";
     group.options.forEach(opt => {
@@ -217,7 +365,14 @@ import {
       col.className = "col";
       col.dataset.groupValue = opt.id;
       col.innerHTML = `
-        <div class="col-header"><span class="col-dot" style="background:${opt.color || "var(--text-dim)"}"></span>${esc(opt.label)} <span class="col-count">${cards.length}</span></div>
+        <div class="col-header">
+          <span class="col-dot" style="background:${opt.color || "var(--text-dim)"}"></span>
+          ${canManageCols
+            ? `<input class="col-name-input" value="${esc(opt.label)}" data-action="rename-col" data-value="${opt.id}">`
+            : `<span class="col-name-static">${esc(opt.label)}</span>`}
+          <span class="col-count">${cards.length}</span>
+          ${canManageCols && group.options.length > 1 ? `<button class="col-del" data-action="delete-col" data-value="${opt.id}" title="Excluir coluna"><i data-lucide="x"></i></button>` : ""}
+        </div>
         <div class="col-cards" data-group-value="${opt.id}">
           ${cards.map(cardHTML).join("")}
         </div>
@@ -225,6 +380,12 @@ import {
       `;
       wrap.appendChild(col);
     });
+    if (canManageCols) {
+      const addCol = document.createElement("div");
+      addCol.className = "col col-new";
+      addCol.innerHTML = `<button data-action="new-col"><i data-lucide="plus"></i> Adicionar outra lista</button>`;
+      wrap.appendChild(addCol);
+    }
     container.innerHTML = "";
     container.appendChild(wrap);
     icons();
@@ -234,9 +395,13 @@ import {
   function cardHTML(t) {
     const overdue = t.dueDate && t.dueDate < todayStr() && t.status !== "done";
     const doneItems = (t.checklist || []).filter(c => c.done).length;
+    const ws = activeWorkspace();
+    const tagObjs = (t.tags || []).map(tid => (ws?.labels || []).find(l => l.id === tid)).filter(Boolean);
     return `
     <div class="tcard" draggable="true" data-task-id="${t.id}" data-priority="${t.priority}" data-action="open-task">
+      <button class="card-move-btn" data-action="quick-move" data-task-id="${t.id}" title="Mover para outra coluna"><i data-lucide="arrow-left-right"></i></button>
       <div class="tcard-title">${esc(t.title)}</div>
+      ${tagObjs.length ? `<div class="tcard-tags">${tagObjs.map(tg => `<span class="tag-pill" style="--tag-color:${tg.color}">${esc(tg.name)}</span>`).join("")}</div>` : ""}
       <div class="tcard-meta">
         ${t.priority && t.priority !== "none" ? `<span class="pill pill-priority-${t.priority}">${PRIORITY.find(p=>p.id===t.priority).label}</span>` : ""}
         ${t.dueDate ? `<span class="pill pill-due ${overdue ? "overdue" : ""}"><i data-lucide="calendar" style="width:11px;height:11px"></i> ${fmtDate(t.dueDate)}</span>` : ""}
@@ -268,7 +433,7 @@ import {
         if (!task) return;
         const newVal = col.dataset.groupValue;
         if (task[groupField] !== newVal) {
-          const group = GROUPABLE.find(g => g.id === groupField);
+          const group = groupableDefs().find(g => g.id === groupField);
           logActivity(task, `${group.label} alterado para "${group.options.find(o=>o.id===newVal).label}"`);
           task[groupField] = newVal;
           await saveTask(task);
@@ -289,14 +454,14 @@ import {
         <thead><tr><th>Título</th><th>Status</th><th>Prioridade</th><th>Prazo</th><th>Atualizado</th></tr></thead>
         <tbody>
           ${rows.map(t => {
-            const s = STATUS.find(x=>x.id===t.status);
+            const s = currentStatuses().find(x=>x.id===t.status);
             return `
             <tr data-action="open-task" data-task-id="${t.id}">
-              <td>${esc(t.title)}</td>
-              <td><span class="status-dot" style="--dot-color:${s?.color||"var(--text-dim)"}">${s?.label || ""}</span></td>
-              <td>${PRIORITY.find(p=>p.id===t.priority)?.label || ""}</td>
-              <td>${t.dueDate ? fmtDate(t.dueDate) : "—"}</td>
-              <td>${fmtDateTime(t.updatedAt)}</td>
+              <td data-label="Título">${esc(t.title)}</td>
+              <td data-label="Status"><span class="status-dot" style="--dot-color:${s?.color||"var(--text-dim)"}">${s?.label || ""}</span></td>
+              <td data-label="Prioridade">${PRIORITY.find(p=>p.id===t.priority)?.label || ""}</td>
+              <td data-label="Prazo">${t.dueDate ? fmtDate(t.dueDate) : "—"}</td>
+              <td data-label="Atualizado">${fmtDateTime(t.updatedAt)}</td>
             </tr>`;}).join("")}
         </tbody>
       </table>`;
@@ -359,7 +524,8 @@ import {
       <div class="report-controls">
         <label>De <input type="date" id="repFrom" value="${from}"></label>
         <label>Até <input type="date" id="repTo" value="${to}"></label>
-        <button class="icon-btn primary" id="genReportBtn"><i data-lucide="sparkles"></i> Gerar relatório</button>
+        <button class="icon-btn primary" id="genReportBtn"><i data-lucide="list-checks"></i> Gerar relatório</button>
+        ${state.groqApiKey ? `<button class="icon-btn" id="genReportAiBtn"><i data-lucide="sparkles"></i> Gerar com IA (Groq)</button>` : `<span class="hint-inline">Configure uma chave Groq em Configurações para gerar com IA.</span>`}
         <button class="icon-btn" id="printReportBtn"><i data-lucide="download"></i> Exportar PDF</button>
       </div>
       <div id="reportOutput" class="hidden"></div>
@@ -370,8 +536,37 @@ import {
       state.reportTo = $("#repTo").value;
       generateReport(state.reportFrom, state.reportTo);
     });
+    if ($("#genReportAiBtn")) $("#genReportAiBtn").addEventListener("click", () => {
+      state.reportFrom = $("#repFrom").value;
+      state.reportTo = $("#repTo").value;
+      generateReportWithGroq(state.reportFrom, state.reportTo);
+    });
     $("#printReportBtn").addEventListener("click", () => window.print());
     if (state.lastReportHTML) { $("#reportOutput").innerHTML = state.lastReportHTML; $("#reportOutput").classList.remove("hidden"); icons(); }
+  }
+
+  async function generateReportWithGroq(from, to) {
+    const out = $("#reportOutput");
+    out.classList.remove("hidden");
+    out.innerHTML = `<p style="color:var(--text-dim)"><i data-lucide="loader-circle" class="spin"></i> Gerando relatório com IA (Groq)...</p>`;
+    icons();
+    const inRange = state.tasks.filter(t => {
+      const d = (t.dueDate || (t.updatedAt && new Date(t.updatedAt).toISOString().slice(0, 10)));
+      return d >= from && d <= to;
+    });
+    try {
+      const md = await callGroq(buildReportPrompt(from, to, inRange));
+      const html = `
+        <h2 style="margin-top:0">Relatório de produtividade <span class="ai-tag">IA · Groq</span></h2>
+        <p style="color:var(--text-dim)">Período: ${fmtDate(from)} a ${fmtDate(to)} — gerado por IA a partir dos dados do espaço "${esc(activeWorkspace().name)}".</p>
+        ${mdToHtml(md)}
+      `;
+      state.lastReportHTML = html;
+      out.innerHTML = html;
+      icons();
+    } catch (e) {
+      out.innerHTML = `<p style="color:var(--danger)">Não foi possível gerar o relatório com IA: ${esc(e.message)}</p><p style="color:var(--text-dim)">Você pode usar o botão "Gerar relatório" (local, funciona offline) enquanto isso.</p>`;
+    }
   }
 
   function generateReport(from, to) {
@@ -470,6 +665,70 @@ import {
     else if (state.view === "table") renderTable(container);
     else if (state.view === "calendar") renderCalendar(container);
     else if (state.view === "reports") renderReports(container);
+    else if (state.view === "settings") renderSettings(container);
+  }
+
+  /* ================= configurações ================= */
+  function renderSettings(container) {
+    container.innerHTML = `
+      <div class="settings-page">
+        <section class="settings-card">
+          <h3><i data-lucide="download"></i> Backup dos dados</h3>
+          <p class="hint">Baixe um arquivo .json com todos os espaços, tarefas e anexos — guarde em outro lugar como cópia de segurança.</p>
+          <div class="settings-row">
+            <button class="icon-btn primary" data-action="download-backup"><i data-lucide="download"></i> Baixar backup (.json)</button>
+            <button class="icon-btn" data-action="restore-backup"><i data-lucide="upload"></i> Restaurar backup</button>
+          </div>
+        </section>
+
+        <section class="settings-card">
+          <h3><i data-lucide="sparkles"></i> Relatório com IA (Groq)</h3>
+          <p class="hint">Cadastre uma chave gratuita da <strong>Groq</strong> (console.groq.com/keys) para gerar relatórios de produtividade redigidos por IA, na tela de Relatórios. Opcional — sem chave, o relatório local continua funcionando normalmente e offline.</p>
+          <label class="settings-label">Chave de API</label>
+          <div class="settings-row">
+            <input type="password" id="groqKeyInput" placeholder="gsk_..." value="${esc(state.groqApiKey || "")}">
+            <button class="icon-btn" id="toggleGroqKeyBtn" type="button" title="Mostrar/ocultar"><i data-lucide="eye"></i></button>
+          </div>
+          <label class="settings-label">Modelo (opcional)</label>
+          <input id="groqModelInput" placeholder="llama-3.3-70b-versatile" value="${esc(state.groqModel || "")}">
+          <div class="settings-row" style="margin-top:var(--sp-3)">
+            <button class="icon-btn primary" id="saveGroqBtn"><i data-lucide="save"></i> Salvar</button>
+            ${state.groqApiKey ? `<button class="icon-btn" id="clearGroqBtn"><i data-lucide="x"></i> Remover chave</button>` : ""}
+            <span id="groqSaveStatus" class="hint-inline"></span>
+          </div>
+        </section>
+
+        <section class="settings-card">
+          <h3><i data-lucide="key-round"></i> Sobre seus dados</h3>
+          <p class="hint">Tudo roda 100% local, salvo no armazenamento deste navegador (IndexedDB). Nada é enviado para nenhum servidor — exceto o texto do relatório, que só é enviado à Groq se você gerar um relatório com IA.</p>
+        </section>
+      </div>
+    `;
+    icons();
+    wireSettingsEvents();
+  }
+
+  function wireSettingsEvents() {
+    let keyVisible = false;
+    $("#toggleGroqKeyBtn").addEventListener("click", () => {
+      keyVisible = !keyVisible;
+      $("#groqKeyInput").type = keyVisible ? "text" : "password";
+      $("#toggleGroqKeyBtn").innerHTML = keyVisible ? `<i data-lucide="eye-off"></i>` : `<i data-lucide="eye"></i>`;
+      icons();
+    });
+    $("#saveGroqBtn").addEventListener("click", async () => {
+      state.groqApiKey = $("#groqKeyInput").value.trim();
+      state.groqModel = $("#groqModelInput").value.trim();
+      await dbPutMeta("groqApiKey", state.groqApiKey);
+      await dbPutMeta("groqModel", state.groqModel);
+      $("#groqSaveStatus").textContent = "Salvo.";
+      renderSettings($("#viewArea"));
+    });
+    if ($("#clearGroqBtn")) $("#clearGroqBtn").addEventListener("click", async () => {
+      state.groqApiKey = ""; state.groqModel = "";
+      await dbPutMeta("groqApiKey", ""); await dbPutMeta("groqModel", "");
+      renderSettings($("#viewArea"));
+    });
   }
 
   /* ================= task modal ================= */
@@ -488,11 +747,27 @@ import {
         </div>
         <input id="tmTitle" value="${esc(task.title)}" placeholder="Título da tarefa">
         <div class="tm-meta-bar">
-          <select id="tmStatus" class="meta-select">${STATUS.map(s => `<option value="${s.id}" ${s.id===task.status?"selected":""}>${s.label}</option>`).join("")}</select>
+          <select id="tmStatus" class="meta-select">${currentStatuses().map(s => `<option value="${s.id}" ${s.id===task.status?"selected":""}>${s.label}</option>`).join("")}</select>
           <select id="tmPriority" class="meta-select">${PRIORITY.map(p => `<option value="${p.id}" ${p.id===task.priority?"selected":""}>${p.label}</option>`).join("")}</select>
           <input type="date" id="tmDue" class="meta-select" value="${task.dueDate||""}">
         </div>
         <div class="tm-body">
+          <div class="field-label">Tags</div>
+          <div class="label-chips">
+            ${(activeWorkspace()?.labels || []).map(l => `
+              <button type="button" class="chip-toggle ${(task.tags||[]).includes(l.id) ? "active" : ""}" style="--chip-color:${l.color}" data-action="toggle-tag" data-tag-id="${l.id}">
+                <span class="chip-dot" style="background:${l.color}"></span>${esc(l.name)}
+                <span class="chip-del" data-action="delete-tag" data-tag-id="${l.id}" title="Excluir tag"><i data-lucide="x"></i></span>
+              </button>`).join("") || `<p style="color:var(--text-faint);font-size:var(--fs-sm);margin:0">Nenhuma tag criada ainda.</p>`}
+          </div>
+          <form id="newTagForm" class="inline-form stacked">
+            <input id="newTagName" placeholder="Nova tag...">
+            <div class="swatches" id="tagSwatches">
+              ${TAG_COLORS.map((c, i) => `<button type="button" class="swatch ${i === 0 ? "active" : ""}" data-color="${c}" style="background:${c}"></button>`).join("")}
+            </div>
+            <button type="submit"><i data-lucide="plus"></i> Criar tag</button>
+          </form>
+
           <div class="field-label">Conteúdo</div>
           <div id="blockEditor">${task.content.map(blockHTML).join("")}</div>
           <div class="add-block-row">
@@ -537,7 +812,7 @@ import {
   }
 
   function applyMetaSelectColors(task) {
-    const s = STATUS.find(x => x.id === task.status);
+    const s = currentStatuses().find(x => x.id === task.status);
     const statusEl = $("#tmStatus");
     if (statusEl && s) { statusEl.style.background = `color-mix(in srgb, ${s.color} 16%, var(--surface-2))`; statusEl.style.color = s.color; }
   }
@@ -550,7 +825,7 @@ import {
 
   function wireTaskModalEvents(task) {
     $("#tmTitle").addEventListener("change", async (e) => { task.title = e.target.value.trim() || "Sem título"; await saveTask(task); renderSidebarSafe(); renderView(); });
-    $("#tmStatus").addEventListener("change", async (e) => { logActivity(task, `Status alterado para "${STATUS.find(s=>s.id===e.target.value).label}"`); task.status = e.target.value; await saveTask(task); applyMetaSelectColors(task); renderView(); renderTaskModal(); });
+    $("#tmStatus").addEventListener("change", async (e) => { logActivity(task, `Status alterado para "${currentStatuses().find(s=>s.id===e.target.value).label}"`); task.status = e.target.value; await saveTask(task); applyMetaSelectColors(task); renderView(); renderTaskModal(); });
     $("#tmPriority").addEventListener("change", async (e) => { task.priority = e.target.value; await saveTask(task); renderView(); });
     $("#tmDue").addEventListener("change", async (e) => { task.dueDate = e.target.value; await saveTask(task); renderView(); });
 
@@ -565,6 +840,30 @@ import {
           await saveTask(task);
         });
       });
+    });
+
+    let selectedTagColor = TAG_COLORS[0];
+    $$("#tagSwatches .swatch").forEach(sw => {
+      sw.addEventListener("click", () => {
+        selectedTagColor = sw.dataset.color;
+        $$("#tagSwatches .swatch").forEach(s => s.classList.remove("active"));
+        sw.classList.add("active");
+      });
+    });
+    $("#newTagForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = $("#newTagName");
+      const name = input.value.trim();
+      if (!name) return;
+      const ws = activeWorkspace();
+      ws.labels = ws.labels || [];
+      const newTag = { id: uid(), name, color: selectedTagColor };
+      ws.labels.push(newTag);
+      task.tags = task.tags || [];
+      task.tags.push(newTag.id);
+      await dbPut("workspaces", ws);
+      await saveTask(task);
+      renderView(); renderTaskModal();
     });
 
     $("#checklistForm").addEventListener("submit", async (e) => {
@@ -623,7 +922,7 @@ import {
     $("#searchResults").innerHTML = results.length ? results.map((t, i) => `
       <div class="sr-item ${i === state.searchActiveIndex ? "active" : ""}" data-action="open-task" data-task-id="${t.id}" data-index="${i}">
         <i class="sr-icon" data-lucide="file-text"></i><span>${highlightMatch(t.title, q.trim())}</span>
-        <span class="sr-status">${STATUS.find(s=>s.id===t.status)?.label||""}</span>
+        <span class="sr-status">${currentStatuses().find(s=>s.id===t.status)?.label||""}</span>
       </div>`).join("") : `<div class="sr-empty">${query ? `Nenhum resultado para "${esc(q.trim())}".` : "Comece a digitar para buscar."}</div>`;
     icons();
   }
@@ -663,6 +962,27 @@ import {
     setTimeout(() => $("#wsNameInput").focus(), 0);
   }
   function closeWsForm() { $("#wsFormOverlay").classList.add("hidden"); $("#wsFormOverlay").innerHTML = ""; }
+
+  /* ================= mover tarefa (alternativa ao drag no toque) ================= */
+  function openMoveSheet() {
+    const task = findTask(state.moveTaskId);
+    const overlay = $("#moveSheetOverlay");
+    if (!task) { overlay.classList.add("hidden"); return; }
+    overlay.classList.remove("hidden");
+    overlay.innerHTML = `
+      <div class="simple-box move-sheet">
+        <h3>Mover "${esc(task.title)}"</h3>
+        <div class="move-options">
+          ${currentStatuses().map(s => `
+            <button class="move-option ${s.id === task.status ? "active" : ""}" data-action="move-to" data-status="${s.id}">
+              <span class="col-dot" style="background:${s.color}"></span>${esc(s.label)}
+            </button>`).join("")}
+        </div>
+        <div class="row"><button data-action="close-move-sheet">Cancelar</button></div>
+      </div>`;
+    icons();
+  }
+  function closeMoveSheet() { $("#moveSheetOverlay").classList.add("hidden"); $("#moveSheetOverlay").innerHTML = ""; }
 
   /* ================= theme ================= */
   function setTheme(theme) {
@@ -758,6 +1078,70 @@ import {
           renderView(); renderTaskModal();
           break;
         }
+        case "new-col": {
+          const ws = activeWorkspace();
+          if (!ws) return;
+          const name = prompt("Nome da nova coluna:");
+          if (!name || !name.trim()) return;
+          currentStatuses().push({ id: uid(), label: name.trim(), color: "var(--text-dim)" });
+          await dbPut("workspaces", ws);
+          renderView();
+          break;
+        }
+        case "delete-col": {
+          const ws = activeWorkspace();
+          if (!ws) return;
+          const cols = currentStatuses();
+          if (cols.length <= 1) return;
+          if (!confirm("Excluir esta coluna? As tarefas dela vão para a primeira coluna restante.")) return;
+          const removedId = t.dataset.value;
+          ws.statuses = cols.filter(c => c.id !== removedId);
+          const fallbackId = ws.statuses[0].id;
+          const affected = state.tasks.filter(tk => tk.status === removedId);
+          for (const tk of affected) { tk.status = fallbackId; await saveTask(tk); }
+          await dbPut("workspaces", ws);
+          renderView();
+          break;
+        }
+        case "quick-move": {
+          state.moveTaskId = t.dataset.taskId;
+          openMoveSheet();
+          break;
+        }
+        case "move-to": {
+          const task = findTask(state.moveTaskId);
+          if (task) { task.status = t.dataset.status; await saveTask(task); }
+          state.moveTaskId = null;
+          closeMoveSheet();
+          renderView();
+          break;
+        }
+        case "close-move-sheet": state.moveTaskId = null; closeMoveSheet(); break;
+        case "toggle-tag": {
+          const task = findTask(state.openTaskId);
+          const tid = t.dataset.tagId;
+          task.tags = task.tags || [];
+          if (task.tags.includes(tid)) task.tags = task.tags.filter(id => id !== tid);
+          else task.tags.push(tid);
+          await saveTask(task);
+          renderView(); renderTaskModal();
+          break;
+        }
+        case "delete-tag": {
+          e.stopPropagation();
+          const ws = activeWorkspace();
+          if (!ws || !confirm("Excluir esta tag? Ela será removida de todas as tarefas.")) return;
+          const tid = t.dataset.tagId;
+          ws.labels = (ws.labels || []).filter(l => l.id !== tid);
+          await dbPut("workspaces", ws);
+          for (const tk of state.tasks) {
+            if (tk.tags && tk.tags.includes(tid)) { tk.tags = tk.tags.filter(id => id !== tid); await saveTask(tk); }
+          }
+          renderView(); renderTaskModal();
+          break;
+        }
+        case "download-backup": exportBackup(); break;
+        case "restore-backup": $("#restoreFileInput").click(); break;
       }
     });
 
@@ -769,7 +1153,22 @@ import {
         await saveTask(task);
         renderView(); renderTaskModal();
       }
+      if (e.target.matches('[data-action="rename-col"]')) {
+        const ws = activeWorkspace();
+        const col = (ws?.statuses || []).find(c => c.id === e.target.dataset.value);
+        if (col) { col.label = e.target.value.trim() || col.label; await dbPut("workspaces", ws); renderSidebar(); }
+      }
+      if (e.target.id === "restoreFileInput") {
+        const file = e.target.files && e.target.files[0];
+        if (file) restoreBackup(file);
+        e.target.value = "";
+      }
     });
+
+    $("#mobileMenuBtn").addEventListener("click", () => { $("#sidebar").classList.add("mobile-open"); $("#sidebarBackdrop").classList.remove("hidden"); });
+    $("#sidebarBackdrop").addEventListener("click", () => { $("#sidebar").classList.remove("mobile-open"); $("#sidebarBackdrop").classList.add("hidden"); });
+    $$(".nav-link").forEach(a => a.addEventListener("click", () => { $("#sidebar").classList.remove("mobile-open"); $("#sidebarBackdrop").classList.add("hidden"); }));
+    $("#moveSheetOverlay").addEventListener("click", (e) => { if (e.target.id === "moveSheetOverlay") { state.moveTaskId = null; closeMoveSheet(); } });
 
     $("#workspaceBtn").addEventListener("click", () => $("#workspaceMenu").classList.toggle("hidden"));
     document.addEventListener("click", (e) => { if (!e.target.closest("#workspaceSwitch")) $("#workspaceMenu").classList.add("hidden"); });
@@ -798,6 +1197,8 @@ import {
   async function init() {
     const savedTheme = await dbGetMeta("theme", null);
     setTheme(savedTheme || "light");
+    state.groqApiKey = await dbGetMeta("groqApiKey", "");
+    state.groqModel = await dbGetMeta("groqModel", "");
     await seedIfEmpty();
     const savedWs = await dbGetMeta("activeWorkspaceId", null);
     state.activeWorkspaceId = state.workspaces.find(w => w.id === savedWs) ? savedWs : (state.workspaces[0]?.id || null);

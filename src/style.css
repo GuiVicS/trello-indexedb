@@ -378,3 +378,179 @@ table.tbl tbody tr:hover td { background: var(--accent-soft); cursor: pointer; }
   z-index: 100;
   box-shadow: var(--shadow-lg);
 }
+
+/* =========================================================
+   Colunas personalizáveis
+   ========================================================= */
+.col-header { flex-wrap: nowrap; }
+.col-name-input {
+  flex: 1; min-width: 0; background: transparent; border: 1px solid transparent; border-radius: var(--r-sm);
+  padding: 2px 4px; font: inherit; font-weight: 600; font-size: var(--fs-sm); text-transform: uppercase;
+  letter-spacing: 0.03em; color: var(--text-dim);
+}
+.col-name-input:hover, .col-name-input:focus { background: var(--surface); border-color: var(--border); color: var(--text); }
+.col-name-static { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-del { flex-shrink: 0; background: transparent; border: none; color: var(--text-faint); padding: 3px; border-radius: var(--r-sm); opacity: 0; }
+.col-header:hover .col-del { opacity: 1; }
+.col-del:hover { color: var(--danger); background: var(--danger-soft); }
+.col.col-new { background: transparent; border: 1px dashed var(--border); align-items: stretch; justify-content: flex-start; }
+.col-new button { width: 100%; height: 100%; min-height: 44px; background: transparent; border: none; color: var(--text-dim); display: flex; align-items: center; justify-content: center; gap: var(--sp-2); font-size: var(--fs-sm); border-radius: var(--r-lg); }
+.col-new button:hover { color: var(--accent); background: var(--surface-2); }
+
+/* =========================================================
+   Tags personalizadas
+   ========================================================= */
+.tcard-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag-pill { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: var(--r-full); color: #fff; background: var(--tag-color, var(--text-dim)); }
+.card-move-btn {
+  display: none; position: absolute; top: var(--sp-2); right: var(--sp-2); z-index: 2;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-full);
+  width: 30px; height: 30px; align-items: center; justify-content: center; color: var(--text-dim);
+}
+.label-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.chip-toggle {
+  display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-full); padding: 5px 8px 5px 10px; font-size: var(--fs-sm); color: var(--text-dim);
+}
+.chip-toggle.active { border-color: var(--chip-color); color: var(--text); background: color-mix(in srgb, var(--chip-color) 16%, var(--surface-2)); }
+.chip-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--chip-color); }
+.chip-del { display: inline-flex; align-items: center; justify-content: center; padding: 2px; border-radius: var(--r-sm); color: var(--text-faint); }
+.chip-del:hover { color: var(--danger); background: var(--danger-soft); }
+.chip-del [data-lucide] { width: 11px; height: 11px; }
+.inline-form.stacked { flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+.swatches { display: flex; gap: 6px; margin: 2px 0; }
+.swatch { width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; padding: 0; }
+.swatch.active { border-color: var(--text); }
+
+/* =========================================================
+   Sheet de mover tarefa (alternativa ao drag no toque)
+   ========================================================= */
+.move-sheet h3 { margin-top: 0; }
+.move-options { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-3) 0; }
+.move-option { display: flex; align-items: center; gap: var(--sp-2); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-3); text-align: left; font-weight: 500; min-height: 44px; }
+.move-option.active { border-color: var(--accent); color: var(--accent); }
+
+/* =========================================================
+   Configurações
+   ========================================================= */
+.settings-page { display: flex; flex-direction: column; gap: var(--sp-4); max-width: 640px; }
+.settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-5); box-shadow: var(--shadow-sm); }
+.settings-card h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-2); font-size: var(--fs-md); }
+.settings-card .hint { color: var(--text-dim); font-size: var(--fs-sm); margin: 0 0 var(--sp-3); }
+.settings-label { display: block; font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin: var(--sp-3) 0 var(--sp-2); }
+.settings-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.settings-card input { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); width: 100%; }
+.settings-row input { width: auto; flex: 1; min-width: 160px; }
+.hint-inline { color: var(--text-faint); font-size: var(--fs-xs); }
+.spin { animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* =========================================================
+   Elementos exclusivos do mobile (ocultos por padrão)
+   ========================================================= */
+#sidebarBackdrop { display: none; }
+#sidebarBackdrop.hidden { display: none !important; }
+#mobileMenuBtn { display: none; }
+#mobileTabBar { display: none; }
+
+/* =========================================================
+   Layout mobile (<768px) — shell dedicado a toque
+   ========================================================= */
+@media (max-width: 768px) {
+  html { -webkit-text-size-adjust: 100%; }
+  body { overflow: hidden; }
+
+  /* sidebar vira gaveta (drawer) off-canvas */
+  #sidebar {
+    position: fixed; inset: 0 auto 0 0; width: 84vw; max-width: 320px; min-width: 0;
+    height: 100%; z-index: 80; transform: translateX(-100%);
+    transition: transform 200ms cubic-bezier(.2,.7,.3,1);
+    padding-top: calc(var(--sp-4) + env(safe-area-inset-top));
+    padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom));
+    box-shadow: var(--shadow-lg);
+  }
+  #sidebar.mobile-open { transform: translateX(0); }
+  #sidebar nav#navLinks { display: none; }
+  #sidebarBackdrop:not(.hidden) { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 75; }
+
+  #mobileMenuBtn {
+    display: flex; align-items: center; justify-content: center;
+    position: fixed; top: calc(var(--sp-3) + env(safe-area-inset-top)); left: var(--sp-3); z-index: 20;
+    width: 40px; height: 40px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); color: var(--text);
+  }
+  #main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  #topbar { padding: calc(var(--sp-3) + env(safe-area-inset-top)) var(--sp-4) var(--sp-3) 60px; flex-wrap: wrap; }
+  #topbar h1 { font-size: var(--fs-lg); }
+  #viewArea { padding: var(--sp-3); }
+
+  /* barra de abas inferior (navegação principal) */
+  #mobileTabBar {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  }
+  /* overlays de tela cheia (tarefa, busca, sheets) ficam acima da barra de abas e do FAB */
+  .overlay, #searchOverlay:not(.hidden), .simple-overlay:not(.hidden) { z-index: 90; }
+  #mobileTabBar .nav-link {
+    flex: 1; flex-direction: column; gap: 3px; padding: 6px 2px; border-radius: var(--r-md);
+    font-size: 10px; text-align: center; color: var(--text-dim);
+  }
+  #mobileTabBar .nav-link.active { color: var(--accent); background: var(--surface-2); }
+  #mobileTabBar .nav-link.active::before { display: none; }
+  #mobileTabBar [data-lucide] { width: 20px; height: 20px; }
+
+  /* botão "Nova tarefa" vira FAB */
+  #newTaskBtn {
+    position: fixed; right: var(--sp-4); bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 55;
+    width: 56px; height: 56px; padding: 0; border-radius: 50%; justify-content: center;
+    box-shadow: var(--shadow-lg); font-size: 0;
+  }
+  #newTaskBtn [data-lucide] { width: 22px; height: 22px; }
+  .group-select { width: 100%; margin-top: var(--sp-2); }
+
+  /* quadro: colunas em swipe horizontal com snap */
+  #boardView { scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; padding-bottom: var(--sp-2); }
+  .col, .col.col-new { width: 86vw; min-width: 86vw; scroll-snap-align: start; max-height: none; }
+  .card-move-btn { display: flex; }
+  .tcard { padding-right: 44px; }
+
+  /* tabela vira lista de cartões empilhados */
+  table.tbl thead { display: none; }
+  table.tbl, table.tbl tbody, table.tbl tr, table.tbl td { display: block; width: 100%; }
+  table.tbl { border: none; box-shadow: none; background: transparent; }
+  table.tbl tr { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); margin-bottom: var(--sp-3); overflow: hidden; box-shadow: var(--shadow-sm); }
+  table.tbl td { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); }
+  table.tbl td::before { content: attr(data-label); font-weight: 600; color: var(--text-dim); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.03em; }
+
+  /* calendário: células menores */
+  .calgrid { gap: 3px; }
+  .calday { min-height: 58px; padding: 4px; border-radius: 8px; }
+  .calday .daynum { font-size: 10px; }
+  .calchip { font-size: 9px; padding: 1px 4px; }
+  #calHeader h2 { font-size: var(--fs-md); min-width: 0; }
+
+  /* relatórios: controles empilhados */
+  .report-controls { flex-direction: column; align-items: stretch; }
+  .report-controls label, .report-controls button, .report-controls .hint-inline { width: 100%; }
+  #reportOutput { padding: var(--sp-4); }
+
+  /* modal de tarefa em tela cheia, tipo app nativo */
+  #taskModal { max-width: 100%; border-left: none; }
+  .tm-header { padding-top: calc(var(--sp-3) + env(safe-area-inset-top)); }
+  .tm-footer { padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom)); }
+
+  /* busca em tela cheia */
+  #searchOverlay { padding-top: env(safe-area-inset-top); align-items: stretch; }
+  #searchModal { max-width: 100%; height: 100%; border-radius: 0; max-height: none; }
+
+  /* formulários simples e sheets viram bottom sheet */
+  .simple-overlay { align-items: flex-end; padding: 0; }
+  .simple-box { max-width: 100%; border-radius: var(--r-lg) var(--r-lg) 0 0; padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom)); }
+
+  .settings-page { max-width: 100%; }
+  .storage-banner { left: var(--sp-3); right: var(--sp-3); bottom: calc(76px + env(safe-area-inset-bottom)); max-width: none; transform: none; }
+
+  /* evita zoom automático do iOS em inputs */
+  input, textarea, select { font-size: 16px; }
+  .pill, .col-count, .tcard-sub, .field-label { font-size: var(--fs-xs); }
+}

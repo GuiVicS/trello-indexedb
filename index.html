@@ -14,6 +14,7 @@
 </head>
 <body>
 <div id="app">
+  <div id="sidebarBackdrop" class="hidden"></div>
   <aside id="sidebar">
     <div class="brand"><i data-lucide="check-check"></i> <span>Tarefas</span></div>
 
@@ -23,10 +24,11 @@
     </div>
 
     <nav id="navLinks">
-      <a class="nav-link" data-view="board"><i data-lucide="columns-3"></i> Quadro</a>
-      <a class="nav-link" data-view="table"><i data-lucide="table"></i> Tabela</a>
-      <a class="nav-link" data-view="calendar"><i data-lucide="calendar-days"></i> Calendário</a>
-      <a class="nav-link" data-view="reports"><i data-lucide="file-text"></i> Relatórios</a>
+      <a class="nav-link" data-view="board"><i data-lucide="columns-3"></i> <span>Quadro</span></a>
+      <a class="nav-link" data-view="table"><i data-lucide="table"></i> <span>Tabela</span></a>
+      <a class="nav-link" data-view="calendar"><i data-lucide="calendar-days"></i> <span>Calendário</span></a>
+      <a class="nav-link" data-view="reports"><i data-lucide="file-text"></i> <span>Relatórios</span></a>
+      <a class="nav-link" data-view="settings"><i data-lucide="settings"></i> <span>Configurações</span></a>
     </nav>
 
     <div class="sidebar-footer">
@@ -35,13 +37,24 @@
     </div>
   </aside>
 
+  <button id="mobileMenuBtn" aria-label="Abrir menu"><i data-lucide="menu"></i></button>
+
   <main id="main">
     <header id="topbar"></header>
     <div id="viewArea"></div>
   </main>
 </div>
 
+<nav id="mobileTabBar">
+  <a class="nav-link" data-view="board"><i data-lucide="columns-3"></i><span>Quadro</span></a>
+  <a class="nav-link" data-view="table"><i data-lucide="table"></i><span>Tabela</span></a>
+  <a class="nav-link" data-view="calendar"><i data-lucide="calendar-days"></i><span>Agenda</span></a>
+  <a class="nav-link" data-view="reports"><i data-lucide="file-text"></i><span>Relatórios</span></a>
+  <a class="nav-link" data-view="settings"><i data-lucide="settings"></i><span>Ajustes</span></a>
+</nav>
+
 <div id="taskOverlay" class="overlay hidden"></div>
+<div id="moveSheetOverlay" class="simple-overlay hidden"></div>
 <div id="searchOverlay" class="hidden">
   <div id="searchModal">
     <div id="searchInputRow">
@@ -58,6 +71,7 @@
 </div>
 <div id="wsFormOverlay" class="simple-overlay hidden"></div>
 <input type="file" id="hiddenFileInput" style="display:none" multiple>
+<input type="file" id="restoreFileInput" accept="application/json" style="display:none">
 
 <script type="module" src="/src/main.js"></script>
 </body>
