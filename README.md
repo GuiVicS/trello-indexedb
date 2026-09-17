@@ -1,7 +1,7 @@
 # Tarefas — app de tarefas local (Trello + Notion, offline via IndexedDB)
 
 Stack: **Vite + vite-plugin-pwa**. Todos os dados ficam no IndexedDB do navegador
-de quem acessa — não há backend, não há login, não há nuvem.
+de quem acessa — não há backend, não há login, não há nuvem. 
 
 ## Rodar localmente
 
