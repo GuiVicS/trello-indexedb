@@ -27,9 +27,9 @@ import {
   const icons = () => { try { createIcons({ icons: LUCIDE_ICONS }); } catch(e) {} };
 
   const STATUS = [
-    { id: "todo", label: "A Fazer", color: "#6B6659" },
-    { id: "doing", label: "Em Andamento", color: "#C9820E" },
-    { id: "done", label: "Concluído", color: "#2E8B57" },
+    { id: "todo", label: "A Fazer", color: "var(--status-todo)" },
+    { id: "doing", label: "Em Andamento", color: "var(--status-doing)" },
+    { id: "done", label: "Concluído", color: "var(--status-done)" },
   ];
   const PRIORITY = [
     { id: "none", label: "Sem prioridade" },
